@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+datos.json
+backups/
+exports/
+proyectos/facturas/
