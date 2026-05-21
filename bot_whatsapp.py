@@ -116,23 +116,25 @@ async def webhook_whatsapp(request):
         return web.Response(text="ok")
 
 async def webhook_twilio(request):
-    """Para Twilio WhatsApp Sandbox"""
+    """Para Twilio WhatsApp Sandbox (sin dependencias externas)"""
     try:
         data = await request.post()
         mensaje = data.get("Body", "")
         chat_id = data.get("From", "")
         nombre = data.get("ProfileName", "Cliente")
-        if not mensaje or not chat_id: return web.Response(text="ok")
+        log.info(f"Twilio [{nombre}]: {mensaje[:100]}")
+        if not mensaje or not chat_id:
+            return web.Response(text="<Response></Response>", content_type="application/xml")
 
         reply = await procesar(mensaje, chat_id, nombre)
 
-        from twilio.twiml.messaging_response import MessagingResponse
-        resp = MessagingResponse()
-        resp.message(reply[:1600])
-        return web.Response(text=str(resp), content_type="application/xml")
+        # Escapar caracteres XML
+        reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{reply[:1600]}</Message></Response>'
+        return web.Response(text=xml, content_type="application/xml")
     except Exception as e:
-        log.error(f"Twilio error: {e}")
-        return web.Response(text="<Response><Message>Gracias! David te contactara pronto.</Message></Response>",
+        log.error(f"Twilio error: {e}", exc_info=True)
+        return web.Response(text='<?xml version="1.0"?><Response><Message>Gracias! David te contactara pronto.</Message></Response>',
             content_type="application/xml")
 
 async def webhook_greenapi(request):
