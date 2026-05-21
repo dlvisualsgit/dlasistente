@@ -116,25 +116,30 @@ async def webhook_whatsapp(request):
         return web.Response(text="ok")
 
 async def webhook_twilio(request):
-    """Para Twilio WhatsApp Sandbox (sin dependencias externas)"""
+    """Para Twilio WhatsApp Sandbox"""
     try:
-        data = await request.post()
-        mensaje = data.get("Body", "")
-        chat_id = data.get("From", "")
-        nombre = data.get("ProfileName", "Cliente")
-        log.info(f"Twilio [{nombre}]: {mensaje[:100]}")
+        # Leer cuerpo como texto y parsear manualmente
+        body_text = await request.text()
+        log.info(f"Twilio raw: {body_text[:300]}")
+
+        import urllib.parse
+        data = urllib.parse.parse_qs(body_text)
+        mensaje = (data.get("Body", [""])[0])
+        chat_id = (data.get("From", [""])[0])
+        nombre = (data.get("ProfileName", ["Cliente"])[0])
+
+        log.info(f"Twilio [{nombre} ({chat_id})]: {mensaje[:100]}")
+
         if not mensaje or not chat_id:
             return web.Response(text="<Response></Response>", content_type="application/xml")
 
         reply = await procesar(mensaje, chat_id, nombre)
-
-        # Escapar caracteres XML
-        reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-        xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{reply[:1600]}</Message></Response>'
+        reply = reply.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        xml = f'<?xml version="1.0"?><Response><Message>{reply[:1600]}</Message></Response>'
         return web.Response(text=xml, content_type="application/xml")
     except Exception as e:
         log.error(f"Twilio error: {e}", exc_info=True)
-        return web.Response(text='<?xml version="1.0"?><Response><Message>Gracias! David te contactara pronto.</Message></Response>',
+        return web.Response(text='<Response><Message>Gracias! David te contactara pronto.</Message></Response>',
             content_type="application/xml")
 
 async def webhook_greenapi(request):
