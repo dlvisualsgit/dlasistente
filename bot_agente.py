@@ -192,17 +192,18 @@ async def on_message(msg):
     if msg.author.bot:
         return
 
-    # Cooldown propio (5 seg en mi canal, 30 seg en sala)
+    # Cooldown (3 seg para todos)
     ahora = datetime.now().timestamp()
-    cooldown = 5 if es_mi_canal else 30
-    if (ahora - ULTIMA_RESPUESTA) < cooldown:
+    if (ahora - ULTIMA_RESPUESTA) < 3:
         return
 
     # En sala-junta: solo si va dirigido al equipo o a mi
     if es_sala:
         txt = msg.content.lower()
-        convocatoria = ["reunion", "reunión", "equipo", "todos", "@everyone", "@here",
-                        "agentes", "presentacion", "presentación", "bienvenidos",
+        # Sin acentos para comparacion
+        sin_acentos = txt.replace("ó","o").replace("í","i").replace("é","e").replace("á","a").replace("ú","u").replace("ñ","n")
+        convocatoria = ["reunion", "equipo", "todos", "@everyone", "@here",
+                        "agentes", "presentacion", "bienvenidos",
                         "hola equipo", "hola a todos", "estado", "daily", "standup"]
         mi_nombre = YO["nombre"].lower()
         variantes = [mi_nombre, f"@{mi_nombre}", f"@{AGENT_ID}", YO["cargo"].lower()]
@@ -211,7 +212,7 @@ async def on_message(msg):
         if AGENT_ID == "copy": variantes += ["luna", "copywriter"]
         if AGENT_ID == "design": variantes += ["nova", "disenadora"]
         if AGENT_ID == "seo": variantes += ["vega"]
-        if not any(c in txt for c in convocatoria) and not any(v in txt for v in variantes):
+        if not any(c in sin_acentos for c in convocatoria) and not any(v in txt for v in variantes):
             return
 
     # Escalonar respuestas en sala para que no hablen todos a la vez
