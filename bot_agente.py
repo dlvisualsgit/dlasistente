@@ -112,6 +112,7 @@ async def tools(texto):
 
 # ─── DETECTAR EN SALA SI EL MENSAJE ES PARA ESTE AGENTE ────────
 ULTIMA_RESPUESTA = 0
+RESPONDIDOS = set()  # IDs de mensajes ya respondidos en sala
 
 def es_para_mi(texto, autor_es_bot=False):
     txt = texto.lower()
@@ -154,57 +155,97 @@ async def on_ready():
             if n in ["sala-junta", "sala", "junta"]: CANAL_SALA = ch.id
 
     print(f"  Canal propio: {CANAL_PROPIO} | Sala: {CANAL_SALA}")
-    if YO["nombre"] in ["Sofia", "Alex"]:
-        client.loop.create_task(proactivo())
+    client.loop.create_task(proactivo_personal())
+    if AGENT_ID != "seo":  # no todos, para no saturar
+        client.loop.create_task(proactivo_sala())
 
-async def proactivo():
+async def proactivo_personal():
+    """Cada agente en su propio canal: tareas, sugerencias, etc."""
     await client.wait_until_ready()
     while not client.is_closed():
-        await asyncio.sleep(900)  # cada 15 min
+        await asyncio.sleep(1200)  # cada 20 min
         try:
             ahora = datetime.now()
             if not (YO["horario"][0] <= ahora.hour < YO["horario"][1]): continue
-            canal = client.get_channel(CANAL_PROPIO or CANAL_SALA)
+            canal = client.get_channel(CANAL_PROPIO)
             if not canal: continue
-
             d = db()
-            tareas_mias = [t for t in d.get("tareas", []) if t.get("agente") == AGENT_ID and not t.get("ok")]
-            prompt = f"Eres {YO['nombre']}. {'Tienes tareas pendientes: ' + str([t['texto'] for t in tareas_mias[:3]]) if tareas_mias else 'No tienes tareas. Revisa el estado de los proyectos y haz algo util o preguntale a David si necesita algo.'}"
-            reply = await ai([{"role":"user","content":"Revisa tu estado y actua."}], prompt)
-            if len(reply) > 20:
+            tareas = [t for t in d.get("tareas", []) if t.get("agente") == AGENT_ID and not t.get("ok")]
+            prompt = f"Eres {YO['nombre']}, {YO['cargo']}. {'Tienes tareas: ' + str([t['texto'] for t in tareas[:3]]) if tareas else 'No tienes tareas. Que puedes hacer util? Revisa el estado o preguntale a David.'}"
+            reply = await ai([{"role":"user","content":"Actua."}], prompt)
+            if reply and len(reply) > 20:
                 tres = await tools(reply)
                 if tres: reply += "\n\n" + tres
-                await canal.send(f"**{YO['nombre']}** dice: {reply[:1997]}")
+                await canal.send(reply[:1997])
+        except: pass
+
+async def proactivo_sala():
+    """Iniciar conversacion natural en sala-junta como compañeros de oficina."""
+    import random
+    temas = ["¿Que tal va todo?", "Buenos dias equipo", "¿Alguna novedad?", "¿Como vamos con los proyectos?",
+             "¿Todo bien por aqui?", "¿Necesitais algo de mi?", "Vaya dia, ¿no?", "¿Alguna noticia interesante?"]
+    await client.wait_until_ready()
+    while not client.is_closed():
+        await asyncio.sleep(2700)
+        try:
+            ahora = datetime.now()
+            if not (YO["horario"][0] <= ahora.hour < YO["horario"][1]): continue
+            canal = client.get_channel(CANAL_SALA)
+            if not canal: continue
+
+            mensaje = f"{YO['nombre']}: {random.choice(temas)}"
+            reply = await ai([{"role":"user","content":mensaje}], f"Eres {YO['nombre']}, {YO['cargo']}. Inicia conversacion casual en #sala-junta.")
+            if reply and len(reply) > 15:
+                await canal.send(reply[:1997])
         except: pass
 
 @client.event
 async def on_message(msg):
-    global ULTIMA_RESPUESTA
+    global ULTIMA_RESPUESTA, RESPONDIDOS
     canal_id = msg.channel.id
     es_mi_canal = canal_id == CANAL_PROPIO
     es_sala = canal_id == CANAL_SALA
     if not es_mi_canal and not es_sala: return
 
-    # Ignorar MIS PROPIOS mensajes (evita bucles)
+    # Ignorar mis propios mensajes
     if client.user and msg.author.id == client.user.id:
         return
-    # Ignorar mensajes de otros bots
-    if msg.author.bot:
-        return
 
-    # Cooldown (3 seg para todos)
     ahora = datetime.now().timestamp()
-    if (ahora - ULTIMA_RESPUESTA) < 3:
+
+    # === MI CANAL PERSONAL ===
+    if es_mi_canal:
+        if msg.author.bot: return
+        if (ahora - ULTIMA_RESPUESTA) < 3: return
+        memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
+        async with msg.channel.typing():
+            reply = await ai(list(memoria), "")
+            if not reply or len(reply) < 10: reply = "Dime, ¿en qué necesitas ayuda?"
+            tres = await tools(reply)
+            if tres: reply += "\n\n" + tres
+        memoria.append({"role": "assistant", "content": reply})
+        ULTIMA_RESPUESTA = ahora
+        await msg.reply(reply[:1997], mention_author=False)
         return
 
-    # En sala-junta: solo si va dirigido al equipo o a mi
-    if es_sala:
+    # === SALA-JUNTA ===
+    # Detectar si es humano o agente del equipo
+    es_agente = msg.author.bot
+    sala_id = f"{msg.author.id}_{msg.id}"
+    if sala_id in RESPONDIDOS: return
+    RESPONDIDOS.add(sala_id)
+    if len(RESPONDIDOS) > 200: RESPONDIDOS = set(list(RESPONDIDOS)[-100:])
+
+    # Cooldown segun quien habla
+    cooldown_sala = 8 if es_agente else 3
+    if (ahora - ULTIMA_RESPUESTA) < cooldown_sala: return
+
+    # Si es humano: comprobar si va dirigido al equipo
+    if not es_agente:
         txt = msg.content.lower()
-        # Sin acentos para comparacion
-        sin_acentos = txt.replace("ó","o").replace("í","i").replace("é","e").replace("á","a").replace("ú","u").replace("ñ","n")
-        convocatoria = ["reunion", "equipo", "todos", "@everyone", "@here",
-                        "agentes", "presentacion", "bienvenidos",
-                        "hola equipo", "hola a todos", "estado", "daily", "standup"]
+        sin_tilde = txt.replace("ó","o").replace("í","i").replace("é","e").replace("á","a").replace("ú","u").replace("ñ","n")
+        convocatoria = ["reunion", "equipo", "todos", "@everyone", "@here", "agentes", "presentacion",
+                        "bienvenidos", "hola equipo", "hola a todos", "estado", "daily", "standup"]
         mi_nombre = YO["nombre"].lower()
         variantes = [mi_nombre, f"@{mi_nombre}", f"@{AGENT_ID}", YO["cargo"].lower()]
         if AGENT_ID == "pm": variantes += ["sofia", "project manager"]
@@ -212,31 +253,31 @@ async def on_message(msg):
         if AGENT_ID == "copy": variantes += ["luna", "copywriter"]
         if AGENT_ID == "design": variantes += ["nova", "disenadora"]
         if AGENT_ID == "seo": variantes += ["vega"]
-        if not any(c in sin_acentos for c in convocatoria) and not any(v in txt for v in variantes):
+        if not any(c in sin_tilde for c in convocatoria) and not any(v in txt for v in variantes):
             return
 
-    # Escalonar respuestas en sala para que no hablen todos a la vez
-    if es_sala:
-        orden = ["pm", "dev", "copy", "design", "seo"]
-        idx = orden.index(AGENT_ID) if AGENT_ID in orden else 0
-        await asyncio.sleep(idx * 3)  # 0, 3, 6, 9, 12 seg
+    # Escalonar respuestas entre agentes
+    orden = ["pm", "dev", "copy", "design", "seo"]
+    idx = orden.index(AGENT_ID) if AGENT_ID in orden else 0
+    await asyncio.sleep(idx * 2)
 
-    memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
+    # Volver a verificar cooldown por si otro agente respondio mientras
+    if (datetime.now().timestamp() - ULTIMA_RESPUESTA) < cooldown_sala: return
 
     extra = ""
-    if es_sala:
-        extra = f"\nREUNION DE EQUIPO. Respondes como {YO['nombre']}, {YO['cargo']}. Di tu estado brevemente (max 2 frases). Incluye tu nombre al empezar."
+    if es_agente:
+        extra = f"\n{msg.author.display_name} ha hablado en #sala-junta. Si te menciona o tienes algo relevante que decir, responde naturalmente como en una conversacion de oficina. Si no, no digas nada. Se breve y natural."
+    else:
+        extra = f"\nEn #sala-junta con el equipo. Responde naturalmente como {YO['nombre']}, como si estuvieras en la oficina con tus companeros."
 
+    memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
     async with msg.channel.typing():
         reply = await ai(list(memoria), extra)
-        if not reply or len(reply) < 15:
-            reply = f"Soy {YO['nombre']}, {YO['cargo']}. Todo en orden por aqui."
-
+        if not reply or len(reply) < 10: return
         tres = await tools(reply)
         if tres: reply += "\n\n" + tres
-
     memoria.append({"role": "assistant", "content": reply})
-    ULTIMA_RESPUESTA = ahora
+    ULTIMA_RESPUESTA = datetime.now().timestamp()
     await msg.reply(reply[:1997], mention_author=False)
 
 client.run(DISCORD_TOKEN)
