@@ -155,17 +155,44 @@ async def on_ready():
             if n in ["sala-junta", "sala", "junta"]: CANAL_SALA = ch.id
 
     print(f"  Canal propio: {CANAL_PROPIO} | Sala: {CANAL_SALA}")
-    # Test: enviar mensaje de confirmacion
-    if CANAL_PROPIO:
+    ahora = datetime.now()
+    h_ini, h_fin = YO["horario"]
+    en_horario = h_ini <= ahora.hour < h_fin
+
+    # Mensaje de inicio de jornada si esta en horario
+    if CANAL_PROPIO and en_horario:
         c = client.get_channel(CANAL_PROPIO)
         if c:
+            saludos = ["¡Buenos dias!", "¡Hola! Comenzando mi jornada.", "¡Arriba! Lista para trabajar.",
+                       "Buenos dias, empecemos.", "¡A darle! Empezando mi turno."]
+            import random
             try:
-                loop = asyncio.get_event_loop()
-                asyncio.ensure_future(c.send(f"✅ {YO['nombre']} online - horario {YO['horario'][0]}:00-{YO['horario'][1]}:00"))
+                asyncio.ensure_future(c.send(f"☀️ **{YO['nombre']}** — {random.choice(saludos)} Estare disponible de {h_ini}:00 a {h_fin}:00."))
             except: pass
+
+    # Tarea para fin de jornada
+    client.loop.create_task(fin_jornada())
     client.loop.create_task(proactivo_personal())
-    if AGENT_ID in ["pm", "dev"]:  # solo PM y Dev inician conversaciones
+    if AGENT_ID in ["pm", "dev"]:
         client.loop.create_task(proactivo_sala())
+
+async def fin_jornada():
+    """Mensaje al finalizar la jornada laboral."""
+    await client.wait_until_ready()
+    _, h_fin = YO["horario"]
+    while not client.is_closed():
+        try:
+            ahora = datetime.now()
+            if ahora.hour == h_fin and ahora.minute == 0:
+                canal = client.get_channel(CANAL_PROPIO)
+                if canal:
+                    despedidas = ["¡Jornada completada! Nos vemos manana.", "Fin de mi turno. ¡Buen descanso!",
+                                  "Termino por hoy. ¡Hasta manana!", "Mi horario ha terminado. Cualquier cosa, manana."]
+                    import random
+                    await canal.send(f"🌙 **{YO['nombre']}** — {random.choice(despedidas)}")
+                await asyncio.sleep(90)  # evitar repetir
+        except: pass
+        await asyncio.sleep(60)
 
 async def proactivo_personal():
     """Cada agente en su propio canal: tareas, sugerencias, etc."""
@@ -264,13 +291,10 @@ async def on_message(msg):
         if not any(c in sin_tilde for c in convocatoria) and not any(v in txt for v in variantes):
             return
 
-    # Escalonar respuestas entre agentes
+    # Escalonar respuestas entre agentes (0, 2, 4, 6, 8 seg)
     orden = ["pm", "dev", "copy", "design", "seo"]
     idx = orden.index(AGENT_ID) if AGENT_ID in orden else 0
     await asyncio.sleep(idx * 2)
-
-    # Volver a verificar cooldown por si otro agente respondio mientras
-    if (datetime.now().timestamp() - ULTIMA_RESPUESTA) < cooldown_sala: return
 
     extra = ""
     if es_agente:
