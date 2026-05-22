@@ -125,10 +125,15 @@ async def on_ready():
     for guild in client.guilds:
         for ch in guild.channels:
             n = ch.name.lower()
-            if n in [f"{AGENT_ID}", AGENT_ID, YO["nombre"].lower(), YO["cargo"].replace(" ","").lower()]:
-                CANAL_PROPIO = ch.id
-            if n in ["sala-junta", "sala"]:
-                CANAL_SALA = ch.id
+            # Cada agente reconoce MULTIPLES nombres de canal
+            nombres_canal = [AGENT_ID, YO["nombre"].lower(), YO["cargo"].lower().replace(" ","")]
+            if AGENT_ID == "pm": nombres_canal += ["pm", "sofia", "projectmanager"]
+            if AGENT_ID == "dev": nombres_canal += ["dev", "alex", "developer", "desarrollador"]
+            if AGENT_ID == "copy": nombres_canal += ["copy", "luna", "copywriter", "redactor"]
+            if AGENT_ID == "design": nombres_canal += ["design", "nova", "diseno", "uxui"]
+            if AGENT_ID == "seo": nombres_canal += ["seo", "vega", "especialistaseo"]
+            if n in nombres_canal: CANAL_PROPIO = ch.id
+            if n in ["sala-junta", "sala", "junta"]: CANAL_SALA = ch.id
 
     print(f"  Canal propio: {CANAL_PROPIO} | Sala: {CANAL_SALA}")
     if YO["nombre"] in ["Sofia", "Alex"]:
