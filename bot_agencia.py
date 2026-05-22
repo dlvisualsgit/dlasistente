@@ -289,27 +289,41 @@ async def proactividad_agentes():
 async def on_ready():
     print(f"Oficina DLvisuals abierta como {client.user}")
 
-    # Mapear canales automaticamente
+    # Auto-crear canales si no existen
+    global ID_SALA
     for guild in client.guilds:
-        for ch in guild.channels:
-            nombre = ch.name.lower()
-            if nombre == "sala-junta" or nombre == "sala":
-                global ID_SALA
-                ID_SALA = ch.id
-            elif nombre == "metricas" or nombre == "panel":
-                CANALES["metricas"] = ch.id
-            elif nombre.startswith("pm-") or nombre == "project-manager":
-                AGENTES["pm"]["canal"] = ch.id
-            elif nombre.startswith("dev-") or nombre.startswith("developer-"):
-                AGENTES["dev"]["canal"] = ch.id
-            elif nombre.startswith("copy-") or nombre.startswith("redactor-"):
-                AGENTES["copy"]["canal"] = ch.id
-            elif nombre.startswith("design-") or nombre.startswith("diseño-"):
-                AGENTES["designer"]["canal"] = ch.id
-            elif nombre.startswith("seo-"):
-                AGENTES["seo"]["canal"] = ch.id
+        # Definir canales que queremos
+        canales_necesarios = {
+            "sala-junta": None,
+            "metricas": None,
+            "pm": "pm",
+            "developer": "dev",
+            "copywriter": "copy",
+            "design": "designer",
+            "seo": "seo"
+        }
 
-    print(f"Canales asignados: PM={AGENTES['pm']['canal']}, Dev={AGENTES['dev']['canal']}, Copy={AGENTES['copy']['canal']}, Designer={AGENTES['designer']['canal']}, SEO={AGENTES['seo']['canal']}, Sala={ID_SALA}")
+        # Mapear canales existentes
+        for ch in guild.channels:
+            n = ch.name.lower()
+            if n == "sala-junta": ID_SALA = ch.id; canales_necesarios.pop("sala-junta", None)
+            elif n == "metricas": CANALES["metricas"] = ch.id; canales_necesarios.pop("metricas", None)
+            elif n in canales_necesarios:
+                ag_id = canales_necesarios.pop(n)
+                if ag_id: AGENTES[ag_id]["canal"] = ch.id
+
+        # Crear los que faltan
+        for nombre_canal, ag_id in canales_necesarios.items():
+            try:
+                nuevo = await guild.create_text_channel(nombre_canal)
+                if nombre_canal == "sala-junta": ID_SALA = nuevo.id
+                elif nombre_canal == "metricas": CANALES["metricas"] = nuevo.id
+                elif ag_id: AGENTES[ag_id]["canal"] = nuevo.id
+                print(f"  ✅ Canal creado: #{nombre_canal}")
+            except Exception as e:
+                print(f"  ❌ No pude crear #{nombre_canal}: {e}")
+
+    print(f"Canales: PM={AGENTES['pm']['canal']}, Dev={AGENTES['dev']['canal']}, Copy={AGENTES['copy']['canal']}, Designer={AGENTES['designer']['canal']}, SEO={AGENTES['seo']['canal']}, Sala={ID_SALA}, Metricas={CANALES.get('metricas')}")
     client.loop.create_task(proactividad_agentes())
 
 @client.event
