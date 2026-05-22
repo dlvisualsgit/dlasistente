@@ -111,10 +111,28 @@ async def tools(texto):
     return "\n".join(res) if res else ""
 
 # ─── DETECTAR EN SALA SI EL MENSAJE ES PARA ESTE AGENTE ────────
-def es_para_mi(texto):
-    menciones = [YO["nombre"].lower(), f"@{YO['nombre'].lower()}", f"@{AGENT_ID}", f"<@{client.user.id}>", "todos", "@everyone", f"@{YO['cargo'].lower()}"]
+ULTIMA_RESPUESTA = 0
+
+def es_para_mi(texto, autor_es_bot=False):
     txt = texto.lower()
-    return any(m in txt for m in menciones)
+    # Palabras que activan a TODOS los agentes
+    convocatoria = ["reunion", "equipo", "todos", "@everyone", "agentes", "presentacion", "estado", "ceremonia",
+                    "daily", "standup", "coordinacion", "os presento", "bienvenidos", "hola equipo"]
+    # Mi nombre y variantes
+    mi_nombre = YO["nombre"].lower()
+    variantes = [mi_nombre, f"@{mi_nombre}", f"@{AGENT_ID}", f"<@{client.user.id}>", YO["cargo"].lower()]
+    if AGENT_ID == "pm": variantes += ["sofia", "project manager"]
+    if AGENT_ID == "dev": variantes += ["alex", "developer"]
+    if AGENT_ID == "copy": variantes += ["luna", "copywriter"]
+    if AGENT_ID == "design": variantes += ["nova", "disenadora", "ux"]
+    if AGENT_ID == "seo": variantes += ["vega", "especialista seo"]
+
+    # Si el mensaje es de otro agente del equipo, responder si mencionan mi nombre
+    if autor_es_bot:
+        return any(v in txt for v in variantes)
+
+    # Si es humano, responder a convocatoria general o a mi nombre
+    return any(c in txt for c in convocatoria) or any(v in txt for v in variantes)
 
 # ─── EVENTOS ────────────────────────────────────────────────────
 @client.event
@@ -161,24 +179,41 @@ async def proactivo():
 
 @client.event
 async def on_message(msg):
-    if msg.author.bot: return
+    global ULTIMA_RESPUESTA
     canal_id = msg.channel.id
     es_mi_canal = canal_id == CANAL_PROPIO
     es_sala = canal_id == CANAL_SALA
+    if not es_mi_canal and not es_sala: return
 
-    # Si es sala pero no va dirigido a mi, ignorar
-    if es_sala and not es_para_mi(msg.content):
-        return
-    # Si no es mi canal ni la sala, ignorar
-    if not es_mi_canal and not es_sala:
-        return
+    # IDs de los agentes (se rellenan al recibir primer mensaje)
+    if not hasattr(on_message, "agentes_ids"):
+        on_message.agentes_ids = []
+
+    # Ver si el autor es otro agente del equipo
+    es_agente = msg.author.bot and (msg.author.id in on_message.agentes_ids or
+        any(n in str(msg.author) for n in ["Sofía", "Alex (Dev)", "Luna", "Nova", "Vega", "PM", "Copy", "Design", "SEO"]))
+
+    # En mi canal personal: responder a cualquiera
+    if es_mi_canal:
+        if msg.author.bot and not es_agente: return
+        es_para_mi_activado = True
+    # En sala-junta: ver si va dirigido a mi
+    else:
+        if msg.author.bot and not es_agente: return
+        es_para_mi_activado = es_para_mi(msg.content, es_agente)
+        if not es_para_mi_activado: return
+
+    # Cooldown para evitar spam en sala
+    ahora = datetime.now().timestamp()
+    if es_sala and (ahora - ULTIMA_RESPUESTA) < 5:  # 5 seg entre respuestas
+        await asyncio.sleep(2)
 
     memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
 
-    # Contexto de sala: los otros agentes pueden estar presentes
     extra = ""
     if es_sala:
-        extra = "\nEstas en #sala-junta. Puedes interactuar con los otros agentes. Usa @nombre para dirigirte a ellos."
+        extra = "\nEstas en #sala-junta con el equipo. Responde si te mencionan o si es una reunion."
+        extra += "\nSi es una reunion, presentate y da tu estado. Luego puedes preguntar a otros (@alex, @luna, @nova, @vega, @sofia)."
 
     async with msg.channel.typing():
         reply = await ai(list(memoria), extra)
@@ -186,6 +221,7 @@ async def on_message(msg):
         if tres: reply += "\n\n" + tres
     memoria.append({"role": "assistant", "content": reply})
 
+    ULTIMA_RESPUESTA = datetime.now().timestamp()
     prefix = f"**{YO['nombre']}** dice: " if es_sala else ""
     await msg.reply(f"{prefix}{reply[:1997]}", mention_author=False)
 
