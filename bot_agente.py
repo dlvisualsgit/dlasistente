@@ -264,58 +264,51 @@ async def on_message(msg):
         return
 
     # === SALA-JUNTA ===
-    # Detectar si es humano o agente del equipo
-    es_agente = msg.author.bot
-    sala_id = f"{msg.author.id}_{msg.id}"
-    if sala_id in RESPONDIDOS: return
-    RESPONDIDOS.add(sala_id)
-    if len(RESPONDIDOS) > 200: RESPONDIDOS = set(list(RESPONDIDOS)[-100:])
+    if es_sala:
+        # Ignorar completamente otros bots
+        if msg.author.bot:
+            return
 
-    # Cooldown segun quien habla
-    cooldown_sala = 8 if es_agente else 3
-    if (ahora - ULTIMA_RESPUESTA) < cooldown_sala: return
-
-    # Si es humano: comprobar si va dirigido al equipo
-    if not es_agente:
+        # Solo responder a mensajes que mencionan al equipo o a mi
         txt = msg.content.lower()
-        sin_tilde = txt.replace("ó","o").replace("í","i").replace("é","e").replace("á","a").replace("ú","u").replace("ñ","n")
-        convocatoria = ["reunion", "equipo", "todos", "@everyone", "@here", "agentes", "presentacion",
-                        "bienvenidos", "hola equipo", "hola a todos", "estado", "daily", "standup"]
+        txt_clean = txt.replace("ó","o").replace("í","i").replace("é","e").replace("á","a").replace("ú","u").replace("ñ","n")
+        palabras_clave = ["reunion", "equipo", "todos", "@everyone", "@here", "agentes", "presentacion",
+                          "bienvenidos", "hola equipo", "hola a todos", "estado", "daily", "standup", "ceremonia"]
         mi_nombre = YO["nombre"].lower()
-        variantes = [mi_nombre, f"@{mi_nombre}", f"@{AGENT_ID}", YO["cargo"].lower()]
-        if AGENT_ID == "pm": variantes += ["sofia", "project manager"]
+        variantes = [mi_nombre, f"@{mi_nombre}", f"@{AGENT_ID}"]
+        if AGENT_ID == "pm": variantes += ["sofia"]
         if AGENT_ID == "dev": variantes += ["alex", "developer"]
         if AGENT_ID == "copy": variantes += ["luna", "copywriter"]
         if AGENT_ID == "design": variantes += ["nova", "disenadora"]
         if AGENT_ID == "seo": variantes += ["vega"]
-        if not any(c in sin_tilde for c in convocatoria) and not any(v in txt for v in variantes):
+
+        activado = any(c in txt_clean for c in palabras_clave) or any(v in txt for v in variantes)
+        if not activado:
             return
 
-    # Escalonar respuestas entre agentes (0, 2, 4, 6, 8 seg)
-    orden = ["pm", "dev", "copy", "design", "seo"]
-    idx = orden.index(AGENT_ID) if AGENT_ID in orden else 0
-    await asyncio.sleep(idx * 2)
+        # Escalonar para que no hablen todos a la vez
+        orden = ["pm", "dev", "copy", "design", "seo"]
+        idx = orden.index(AGENT_ID) if AGENT_ID in orden else 0
+        await asyncio.sleep(idx * 2 + 1)
 
-    extra = ""
-    if es_agente:
-        extra = f"\n{msg.author.display_name} ha hablado en #sala-junta. Si te menciona o tienes algo relevante que decir, responde naturalmente como en una conversacion de oficina. Si no, no digas nada. Se breve y natural."
-    else:
-        extra = f"\nEn #sala-junta con el equipo. Responde naturalmente como {YO['nombre']}, como si estuvieras en la oficina con tus companeros."
+        # Cooldown para evitar spam
+        if (datetime.now().timestamp() - ULTIMA_RESPUESTA) < 5:
+            return
 
-    memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
-    async with msg.channel.typing():
-        reply = await ai(list(memoria), extra)
-        if not reply or len(reply) < 10: return
-        tres = await tools(reply)
-        if tres: reply += "\n\n" + tres
-    memoria.append({"role": "assistant", "content": reply})
-    ULTIMA_RESPUESTA = datetime.now().timestamp()
-    try:
-        await msg.channel.send(reply[:1997])
-    except:
+        memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
+        async with msg.channel.typing():
+            extra = f"\nEstas en #sala-junta en una reunion. Responde como {YO['nombre']}, {YO['cargo']}. Saluda y di brevemente tu estado actual. Maximo 2 frases."
+            reply = await ai(list(memoria), extra)
+            if not reply or len(reply) < 15:
+                reply = f"Soy {YO['nombre']}, {YO['cargo']}. Todo correcto, ¿necesitas algo?"
+        memoria.append({"role": "assistant", "content": reply})
+        ULTIMA_RESPUESTA = datetime.now().timestamp()
+
+        # Enviar como mensaje normal (no reply) para que todos lo vean
         try:
-            await msg.reply(reply[:1997], mention_author=False)
+            await msg.channel.send(reply[:1997])
         except:
             pass
+        return
 
 client.run(DISCORD_TOKEN)
