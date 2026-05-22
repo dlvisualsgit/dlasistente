@@ -155,8 +155,16 @@ async def on_ready():
             if n in ["sala-junta", "sala", "junta"]: CANAL_SALA = ch.id
 
     print(f"  Canal propio: {CANAL_PROPIO} | Sala: {CANAL_SALA}")
+    # Test: enviar mensaje de confirmacion
+    if CANAL_PROPIO:
+        c = client.get_channel(CANAL_PROPIO)
+        if c:
+            try:
+                loop = asyncio.get_event_loop()
+                asyncio.ensure_future(c.send(f"✅ {YO['nombre']} online - horario {YO['horario'][0]}:00-{YO['horario'][1]}:00"))
+            except: pass
     client.loop.create_task(proactivo_personal())
-    if AGENT_ID != "seo":  # no todos, para no saturar
+    if AGENT_ID in ["pm", "dev"]:  # solo PM y Dev inician conversaciones
         client.loop.create_task(proactivo_sala())
 
 async def proactivo_personal():
@@ -278,6 +286,12 @@ async def on_message(msg):
         if tres: reply += "\n\n" + tres
     memoria.append({"role": "assistant", "content": reply})
     ULTIMA_RESPUESTA = datetime.now().timestamp()
-    await msg.reply(reply[:1997], mention_author=False)
+    try:
+        await msg.channel.send(reply[:1997])
+    except:
+        try:
+            await msg.reply(reply[:1997], mention_author=False)
+        except:
+            pass
 
 client.run(DISCORD_TOKEN)
