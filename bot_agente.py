@@ -185,35 +185,44 @@ async def on_message(msg):
     es_sala = canal_id == CANAL_SALA
     if not es_mi_canal and not es_sala: return
 
-    # IDs de los agentes (se rellenan al recibir primer mensaje)
-    if not hasattr(on_message, "agentes_ids"):
-        on_message.agentes_ids = []
+    # Son ignorar completamente mensajes de otros bots
+    if msg.author.bot and client.user and msg.author.id != client.user.id:
+        return
 
-    # Ver si el autor es otro agente del equipo
-    es_agente = msg.author.bot and (msg.author.id in on_message.agentes_ids or
-        any(n in str(msg.author) for n in ["Sofía", "Alex (Dev)", "Luna", "Nova", "Vega", "PM", "Copy", "Design", "SEO"]))
+    # En sala-junta: SOLO responder a humanos, nunca a bots
+    if es_sala and msg.author.bot:
+        return
 
-    # En mi canal personal: responder a cualquiera
-    if es_mi_canal:
-        if msg.author.bot and not es_agente: return
-        es_para_mi_activado = True
-    # En sala-junta: ver si va dirigido a mi
-    else:
-        if msg.author.bot and not es_agente: return
-        es_para_mi_activado = es_para_mi(msg.content, es_agente)
-        if not es_para_mi_activado: return
-
-    # Cooldown para evitar spam en sala
+    # Cooldown propio (30 seg entre mensajes)
     ahora = datetime.now().timestamp()
-    if es_sala and (ahora - ULTIMA_RESPUESTA) < 5:  # 5 seg entre respuestas
-        await asyncio.sleep(2)
+    if (ahora - ULTIMA_RESPUESTA) < 30:
+        return
+
+    # En sala-junta: verificar si va dirigido al equipo o a mi
+    if es_sala:
+        txt = msg.content.lower()
+        # Palabras que activan reunion/equipo
+        convocatoria = ["reunion", "reunión", "equipo", "todos", "@everyone", "@here",
+                        "agentes", "presentacion", "presentación", "bienvenidos",
+                        "hola equipo", "hola a todos", "estado", "daily", "standup"]
+        mi_nombre = YO["nombre"].lower()
+        variantes = [mi_nombre, f"@{mi_nombre}", f"@{AGENT_ID}", YO["cargo"].lower()]
+        if AGENT_ID == "pm": variantes += ["sofia", "project manager"]
+        if AGENT_ID == "dev": variantes += ["alex", "developer"]
+        if AGENT_ID == "copy": variantes += ["luna", "copywriter"]
+        if AGENT_ID == "design": variantes += ["nova", "disenadora"]
+        if AGENT_ID == "seo": variantes += ["vega"]
+
+        activado = any(c in txt for c in convocatoria) or any(v in txt for v in variantes)
+        if not activado:
+            return
 
     memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
 
     extra = ""
     if es_sala:
-        extra = "\nEstas en #sala-junta con el equipo. Responde si te mencionan o si es una reunion."
-        extra += "\nSi es una reunion, presentate y da tu estado. Luego puedes preguntar a otros (@alex, @luna, @nova, @vega, @sofia)."
+        extra = "\nEstas en #sala-junta. Responde SI TE CORRESPONDE: si es reunion, presentate brevemente y da tu estado."
+        extra += "\nNO respondas si otro agente ya ha hablado del mismo tema. NO generes conversacion innecesaria."
 
     async with msg.channel.typing():
         reply = await ai(list(memoria), extra)
@@ -221,7 +230,7 @@ async def on_message(msg):
         if tres: reply += "\n\n" + tres
     memoria.append({"role": "assistant", "content": reply})
 
-    ULTIMA_RESPUESTA = datetime.now().timestamp()
+    ULTIMA_RESPUESTA = ahora
     prefix = f"**{YO['nombre']}** dice: " if es_sala else ""
     await msg.reply(f"{prefix}{reply[:1997]}", mention_author=False)
 
