@@ -214,23 +214,28 @@ async def on_message(msg):
         if not any(c in txt for c in convocatoria) and not any(v in txt for v in variantes):
             return
 
+    # Escalonar respuestas en sala para que no hablen todos a la vez
+    if es_sala:
+        orden = ["pm", "dev", "copy", "design", "seo"]
+        idx = orden.index(AGENT_ID) if AGENT_ID in orden else 0
+        await asyncio.sleep(idx * 3)  # 0, 3, 6, 9, 12 seg
+
     memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
 
     extra = ""
     if es_sala:
-        extra = f"\nINSTRUCCION ESPECIAL: Estas en #sala-junta en una REUNION DE EQUIPO. Debes responder PRESENTANDOTE asi:\n'¡Hola! Soy {YO['nombre']}, {YO['cargo']} de DLvisuals. [di brevemente que estas haciendo o tu estado].'\nSe breve (max 2 frases). Responde en espanol."
+        extra = f"\nREUNION DE EQUIPO. Respondes como {YO['nombre']}, {YO['cargo']}. Di tu estado brevemente (max 2 frases). Incluye tu nombre al empezar."
 
     async with msg.channel.typing():
         reply = await ai(list(memoria), extra)
         if not reply or len(reply) < 15:
-            reply = f"¡Hola! Soy {YO['nombre']}, {YO['cargo']} de DLvisuals. ¿En qué puedo ayudarte?"
+            reply = f"Soy {YO['nombre']}, {YO['cargo']}. Todo en orden por aqui."
 
         tres = await tools(reply)
         if tres: reply += "\n\n" + tres
 
     memoria.append({"role": "assistant", "content": reply})
     ULTIMA_RESPUESTA = ahora
-    prefix = f"**{YO['nombre']}** dice: " if es_sala else ""
-    await msg.reply(f"{prefix}{reply[:1997]}", mention_author=False)
+    await msg.reply(reply[:1997], mention_author=False)
 
 client.run(DISCORD_TOKEN)
