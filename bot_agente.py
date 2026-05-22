@@ -215,14 +215,20 @@ async def on_message(msg):
             return
 
     memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
-    extra = "\nEstas en #sala-junta. Si es reunion, presentate y da tu estado. Se breve." if es_sala else ""
+
+    extra = ""
+    if es_sala:
+        extra = f"\nINSTRUCCION ESPECIAL: Estas en #sala-junta en una REUNION DE EQUIPO. Debes responder PRESENTANDOTE asi:\n'¡Hola! Soy {YO['nombre']}, {YO['cargo']} de DLvisuals. [di brevemente que estas haciendo o tu estado].'\nSe breve (max 2 frases). Responde en espanol."
 
     async with msg.channel.typing():
         reply = await ai(list(memoria), extra)
+        if not reply or len(reply) < 15:
+            reply = f"¡Hola! Soy {YO['nombre']}, {YO['cargo']} de DLvisuals. ¿En qué puedo ayudarte?"
+
         tres = await tools(reply)
         if tres: reply += "\n\n" + tres
-    memoria.append({"role": "assistant", "content": reply})
 
+    memoria.append({"role": "assistant", "content": reply})
     ULTIMA_RESPUESTA = ahora
     prefix = f"**{YO['nombre']}** dice: " if es_sala else ""
     await msg.reply(f"{prefix}{reply[:1997]}", mention_author=False)
