@@ -251,38 +251,68 @@ async def generar_metricas():
 # ─── PROACTIVIDAD POR AGENTE ────────────────────────────────────
 async def proactividad_agentes():
     await client.wait_until_ready()
+    contador = 0
     while not client.is_closed():
-        await asyncio.sleep(600)  # cada 10 min
+        await asyncio.sleep(60)  # cada 1 minuto
+        contador += 1
         try:
             ahora = datetime.now()
             d = db()
             proyectos = [p for p in os.listdir(PROYECTOS_DIR) if os.path.isdir(os.path.join(PROYECTOS_DIR, p))]
+            tareas_pend = [t for t in d.get("tareas",[]) if not t.get("ok")]
+            tareas_por_agente = {}
+            for t in tareas_pend: tareas_por_agente.setdefault(t.get("agente","general"), []).append(t)
 
             for ag_id, info in AGENTES.items():
                 h_ini, h_fin = info["horario"]
-                if not (h_ini <= ahora.hour < h_fin): continue  # fuera de horario
+                if not (h_ini <= ahora.hour < h_fin): continue
                 canal_id = info.get("canal")
                 if not canal_id: continue
                 canal = client.get_channel(canal_id)
                 if not canal: continue
 
-                # Solo si ha pasado tiempo desde la ultima interaccion
-                ult = d.get("metricas", {}).get(ag_id, {}).get("ultima_proactiva", "")
-                if ult:
+                # Cada agente revisa cada ~15 min (15 ciclos de 60s)
+                m = d.get("metricas", {}).get(ag_id, {})
+                ult_pro = m.get("ultima_proactiva", "")
+                cooldown = 900  # 15 min
+                if ult_pro:
                     try:
-                        if (ahora - datetime.fromisoformat(ult)).total_seconds() < 3600: continue
+                        if (ahora - datetime.fromisoformat(ult_pro)).total_seconds() < cooldown: continue
                     except: pass
 
-                prompt = f"Eres {info['nombre']}, {info['cargo']}. Revisa el estado y SI tienes algo util que hacer (generar codigo, sugerir mejora, pedir actualizacion), hazlo. Si no, no digas nada.\nEstado: {len(d['tareas'])} tareas, proyectos: {proyectos}"
-                reply = await ai([{"role":"user","content":"Que deberia hacer ahora?"}], prompt, info["cargo"])
-                if len(reply) > 30:
-                    tres = await tools(reply, canal_id)
-                    if tres: reply += "\n\n" + tres
-                    await canal.send(reply[:1997])
-                    d = db()
-                    d.setdefault("metricas", {}).setdefault(ag_id, {})["ultima_proactiva"] = ahora.isoformat()
-                    guardar(d)
-        except: pass
+                # El contador escalona para que no hablen todos a la vez
+                idx = list(AGENTES.keys()).index(ag_id)
+                if contador % 15 != idx: continue
+
+                tareas_mias = tareas_por_agente.get(ag_id, [])
+
+                prompt = f"""Eres {info['nombre']}, {info['cargo']} en DLvisuals. Debes SER PROACTIVO.
+
+ESTADO ACTUAL:
+- Tareas pendientes totales: {len(tareas_pend)}
+- Tus tareas asignadas: {len(tareas_mias)}: {[t['texto'] for t in tareas_mias[:3]]}
+- Proyectos: {proyectos}
+- Fecha: {ahora.strftime('%d/%m/%Y %H:%M')}
+
+INSTRUCCION:
+1. Si TIENES TAREAS pendientes, EJECUTALAS ahora mismo
+2. Si no tienes tareas, piensa que puedes hacer util para mejorar la agencia: generar codigo, proponer mejoras, investigar algo, etc.
+3. Si no hay absolutamente nada que hacer, proponle algo a David (ej: "¿Quieres que prepare algo para X?")
+4. USA ###TOOL: para ejecutar acciones (save_file, add_task, browse, search)
+5. NO digas "no tengo nada que hacer" - siempre hay algo
+6. Se breve pero concreto"""
+                reply = await ai([{"role":"user","content":"Actua. Revisa tu estado y haz algo util ahora."}], prompt, info["cargo"])
+                if len(reply) < 20: continue
+
+                tres = await tools(reply, canal_id)
+                if tres: reply += "\n\n" + tres
+                await canal.send(reply[:1997])
+
+                d = db()
+                d.setdefault("metricas", {}).setdefault(ag_id, {})["ultima_proactiva"] = ahora.isoformat()
+                guardar(d)
+        except Exception as e:
+            print(f"Error proactividad: {e}")
 
 # ─── EVENTOS ────────────────────────────────────────────────────
 @client.event
