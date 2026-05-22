@@ -185,23 +185,22 @@ async def on_message(msg):
     es_sala = canal_id == CANAL_SALA
     if not es_mi_canal and not es_sala: return
 
-    # Son ignorar completamente mensajes de otros bots
-    if msg.author.bot and client.user and msg.author.id != client.user.id:
+    # Ignorar MIS PROPIOS mensajes (evita bucles)
+    if client.user and msg.author.id == client.user.id:
+        return
+    # Ignorar mensajes de otros bots
+    if msg.author.bot:
         return
 
-    # En sala-junta: SOLO responder a humanos, nunca a bots
-    if es_sala and msg.author.bot:
-        return
-
-    # Cooldown propio (30 seg entre mensajes)
+    # Cooldown propio (5 seg en mi canal, 30 seg en sala)
     ahora = datetime.now().timestamp()
-    if (ahora - ULTIMA_RESPUESTA) < 30:
+    cooldown = 5 if es_mi_canal else 30
+    if (ahora - ULTIMA_RESPUESTA) < cooldown:
         return
 
-    # En sala-junta: verificar si va dirigido al equipo o a mi
+    # En sala-junta: solo si va dirigido al equipo o a mi
     if es_sala:
         txt = msg.content.lower()
-        # Palabras que activan reunion/equipo
         convocatoria = ["reunion", "reunión", "equipo", "todos", "@everyone", "@here",
                         "agentes", "presentacion", "presentación", "bienvenidos",
                         "hola equipo", "hola a todos", "estado", "daily", "standup"]
@@ -212,17 +211,11 @@ async def on_message(msg):
         if AGENT_ID == "copy": variantes += ["luna", "copywriter"]
         if AGENT_ID == "design": variantes += ["nova", "disenadora"]
         if AGENT_ID == "seo": variantes += ["vega"]
-
-        activado = any(c in txt for c in convocatoria) or any(v in txt for v in variantes)
-        if not activado:
+        if not any(c in txt for c in convocatoria) and not any(v in txt for v in variantes):
             return
 
     memoria.append({"role": "user", "content": f"{msg.author.display_name}: {msg.content}"})
-
-    extra = ""
-    if es_sala:
-        extra = "\nEstas en #sala-junta. Responde SI TE CORRESPONDE: si es reunion, presentate brevemente y da tu estado."
-        extra += "\nNO respondas si otro agente ya ha hablado del mismo tema. NO generes conversacion innecesaria."
+    extra = "\nEstas en #sala-junta. Si es reunion, presentate y da tu estado. Se breve." if es_sala else ""
 
     async with msg.channel.typing():
         reply = await ai(list(memoria), extra)
